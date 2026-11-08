@@ -1,0 +1,22 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Dependencies
+node_modules/
+
+# Next.js and build output
+.next/
+out/
+build/
+dist/
+coverage/
+
+# Local runtime data
+uploads/
+
+# Tooling
+*.tsbuildinfo
+.DS_Store
+*.log

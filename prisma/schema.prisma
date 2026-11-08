@@ -1,0 +1,378 @@
+generator client {
+    provider = "prisma-client-js"
+    binaryTargets = ["native", "linux-musl-arm64-openssl-3.0.x"]
+}
+
+datasource db {
+    provider = "postgresql"
+    url      = env("DATABASE_URL")
+}
+
+enum Role {
+  GESTOR
+  INVESTIDOR
+}
+
+enum ObraStatus {
+  PLANEJAMENTO
+  EM_EXECUCAO
+  CONCLUIDA
+  VENDIDA
+}
+
+enum CobrancaStatus {
+  PENDENTE
+  PAGO_AGUARDANDO_CONFIRMACAO
+  PAGO
+  ATRASADO
+}
+
+enum GastoCategoria {
+  MATERIAL
+  MAO_DE_OBRA
+  SERVICO
+  EQUIPAMENTO
+  TAXAS_LICENCAS
+  PROJETO
+  OUTROS
+}
+
+enum GastoOrigem {
+  NOTA_FISCAL
+  BOLETO
+  MAO_DE_OBRA
+  MANUAL
+}
+
+enum AiUsageTipo {
+  CHAT
+  OCR
+}
+
+model User {
+  id                  String    @id @default(uuid())
+  nome                String
+  email               String    @unique
+  telefone            String?
+  senhaHash           String
+  role                Role
+  ativo               Boolean   @default(true)
+  firstLogin          Boolean   @default(false)
+  onboardingConcluido Boolean   @default(false)
+  refreshTokenHash    String?
+  resetTokenHash      String?
+  resetTokenExpires   DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  participacoes Participacao[]
+  aportes       Aporte[]       @relation("AporteInvestidor")
+  cobrancas     Cobranca[]     @relation("CobrancaInvestidor")
+  rateios       RateioItem[]
+  auditLogs     AuditLog[]
+  aiUsageLogs   AiUsageLog[]
+  chatMessages  ChatMessage[]
+
+  @@map("users")
+}
+
+model Obra {
+  id                 String     @id @default(uuid())
+  nome               String
+  endereco           String
+  descricao          String?
+  orcamentoPrevisto  Decimal    @db.Decimal(14, 2)
+  valorVendaEstimado Decimal?   @db.Decimal(14, 2)
+  custoTotal         Decimal    @default(0) @db.Decimal(14, 2)
+  status             ObraStatus @default(PLANEJAMENTO)
+  dataInicio         DateTime?
+  previsaoEntrega    DateTime?
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+
+  fotos         FotoObra[]
+  etapas        Etapa[]
+  aportes       Aporte[]
+  participacoes Participacao[]
+  gastos        Gasto[]
+  cobrancas     Cobranca[]
+  estoque       EstoqueItem[]
+  equipes       Equipe[]
+  escalas       Escala[]
+  venda         Venda?
+  rateios       RateioItem[]
+
+  @@map("obras")
+}
+
+model FotoObra {
+  id           String   @id @default(uuid())
+  obraId       String
+  arquivo      String
+  nomeOriginal String
+  mimeType     String
+  tamanho      Int
+  legenda      String?
+  isPublic     Boolean  @default(false)
+  createdAt    DateTime @default(now())
+
+  obra Obra @relation(fields: [obraId], references: [id], onDelete: Cascade)
+
+  @@index([obraId, createdAt])
+  @@map("fotos_obra")
+}
+
+model Etapa {
+  id                  String    @id @default(uuid())
+  obraId              String
+  nome                String
+  ordem               Int       @default(0)
+  percentualProgresso Int       @default(0)
+  dataConclusao       DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  obra Obra @relation(fields: [obraId], references: [id], onDelete: Cascade)
+
+  @@index([obraId])
+  @@map("etapas")
+}
+
+model Aporte {
+  id           String   @id @default(uuid())
+  obraId       String
+  investidorId String
+  valor        Decimal  @db.Decimal(14, 2)
+  data         DateTime @default(now())
+  observacao   String?
+  createdById  String?
+  createdAt    DateTime @default(now())
+
+  obra       Obra @relation(fields: [obraId], references: [id], onDelete: Cascade)
+  investidor User @relation("AporteInvestidor", fields: [investidorId], references: [id])
+
+  @@index([obraId])
+  @@index([investidorId])
+  @@map("aportes")
+}
+
+model Participacao {
+  id            String   @id @default(uuid())
+  obraId        String
+  investidorId  String
+  totalAportado Decimal  @db.Decimal(14, 2)
+  percentual    Decimal  @db.Decimal(9, 6)
+  updatedAt     DateTime @updatedAt
+
+  obra       Obra @relation(fields: [obraId], references: [id], onDelete: Cascade)
+  investidor User @relation(fields: [investidorId], references: [id])
+
+  @@unique([obraId, investidorId])
+  @@map("participacoes")
+}
+
+model Gasto {
+  id                 String         @id @default(uuid())
+  obraId             String
+  fornecedor         String
+  descricao          String?
+  valor              Decimal        @db.Decimal(14, 2)
+  vencimento         DateTime?
+  dataEmissao        DateTime       @default(now())
+  categoria          GastoCategoria @default(OUTROS)
+  origem             GastoOrigem    @default(MANUAL)
+  comprovanteArquivo String?
+  comprovanteMime    String?
+  comprovantePublic  Boolean        @default(false)
+  dadosOcr           Json?
+  createdById        String?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  obra      Obra        @relation(fields: [obraId], references: [id], onDelete: Cascade)
+  itens     GastoItem[]
+  cobrancas Cobranca[]
+
+  @@index([obraId, dataEmissao])
+  @@map("gastos")
+}
+
+model GastoItem {
+  id            String   @id @default(uuid())
+  gastoId       String
+  descricao     String
+  quantidade    Decimal  @db.Decimal(14, 3)
+  unidade       String?
+  precoUnitario Decimal? @db.Decimal(14, 2)
+
+  gasto Gasto @relation(fields: [gastoId], references: [id], onDelete: Cascade)
+
+  @@map("gasto_itens")
+}
+
+model Cobranca {
+  id                 String         @id @default(uuid())
+  gastoId            String
+  obraId             String
+  investidorId       String
+  valor              Decimal        @db.Decimal(14, 2)
+  percentualAplicado Decimal        @db.Decimal(9, 6)
+  vencimento         DateTime?
+  status             CobrancaStatus @default(PENDENTE)
+  pagoInformadoEm    DateTime?
+  confirmadoEm       DateTime?
+  confirmadoPorId    String?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  gasto      Gasto @relation(fields: [gastoId], references: [id], onDelete: Cascade)
+  obra       Obra  @relation(fields: [obraId], references: [id], onDelete: Cascade)
+  investidor User  @relation("CobrancaInvestidor", fields: [investidorId], references: [id])
+
+  @@index([investidorId, status])
+  @@index([obraId, status])
+  @@map("cobrancas")
+}
+
+model EstoqueItem {
+  id               String   @id @default(uuid())
+  obraId           String
+  item             String
+  unidade          String   @default("un")
+  quantidade       Decimal  @db.Decimal(14, 3)
+  quantidadeMinima Decimal  @default(0) @db.Decimal(14, 3)
+  precoUnitario    Decimal  @default(0) @db.Decimal(14, 2)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  obra Obra @relation(fields: [obraId], references: [id], onDelete: Cascade)
+
+  @@index([obraId])
+  @@map("estoque_itens")
+}
+
+model Equipe {
+  id          String   @id @default(uuid())
+  nome        String
+  obraAtualId String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  obraAtual Obra?          @relation(fields: [obraAtualId], references: [id], onDelete: SetNull)
+  membros   MembroEquipe[]
+  escalas   Escala[]
+
+  @@map("equipes")
+}
+
+model MembroEquipe {
+  id        String   @id @default(uuid())
+  equipeId  String
+  nome      String
+  cargo     String
+  custoHora Decimal  @db.Decimal(10, 2)
+  createdAt DateTime @default(now())
+
+  equipe Equipe @relation(fields: [equipeId], references: [id], onDelete: Cascade)
+
+  @@map("membros_equipe")
+}
+
+model Escala {
+  id         String   @id @default(uuid())
+  equipeId   String
+  obraId     String?
+  dataInicio DateTime
+  dataFim    DateTime
+  tarefa     String
+  createdAt  DateTime @default(now())
+
+  equipe Equipe @relation(fields: [equipeId], references: [id], onDelete: Cascade)
+  obra   Obra?  @relation(fields: [obraId], references: [id], onDelete: SetNull)
+
+  @@index([dataInicio])
+  @@map("escalas")
+}
+
+model Venda {
+  id                String   @id @default(uuid())
+  obraId            String   @unique
+  valorVenda        Decimal  @db.Decimal(14, 2)
+  custoTotal        Decimal  @db.Decimal(14, 2)
+  lucro             Decimal  @db.Decimal(14, 2)
+  parteGestor       Decimal  @db.Decimal(14, 2)
+  parteInvestidores Decimal  @db.Decimal(14, 2)
+  dataVenda         DateTime @default(now())
+  createdById       String?
+  createdAt         DateTime @default(now())
+
+  obra    Obra         @relation(fields: [obraId], references: [id], onDelete: Cascade)
+  rateios RateioItem[]
+
+  @@map("vendas")
+}
+
+model RateioItem {
+  id           String   @id @default(uuid())
+  vendaId      String
+  obraId       String
+  investidorId String
+  percentual   Decimal  @db.Decimal(9, 6)
+  valor        Decimal  @db.Decimal(14, 2)
+  createdAt    DateTime @default(now())
+
+  venda      Venda @relation(fields: [vendaId], references: [id], onDelete: Cascade)
+  obra       Obra  @relation(fields: [obraId], references: [id], onDelete: Cascade)
+  investidor User  @relation(fields: [investidorId], references: [id])
+
+  @@unique([vendaId, investidorId])
+  @@map("rateio_itens")
+}
+
+model AuditLog {
+  id            String   @id @default(uuid())
+  userId        String?
+  acao          String
+  entidade      String
+  entidadeId    String?
+  valorAnterior Json?
+  valorNovo     Json?
+  ip            String?
+  createdAt     DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([entidade, entidadeId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model AiUsageLog {
+  id               String      @id @default(uuid())
+  userId           String?
+  tipo             AiUsageTipo
+  model            String
+  promptTokens     Int
+  completionTokens Int
+  estimatedCostUsd Decimal     @db.Decimal(12, 6)
+  createdAt        DateTime    @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@map("ai_usage_logs")
+}
+
+model ChatMessage {
+  id             String   @id @default(uuid())
+  conversationId String
+  userId         String
+  role           String
+  content        String
+  createdAt      DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+  @@map("chat_messages")
+}
